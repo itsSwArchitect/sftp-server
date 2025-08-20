@@ -6,7 +6,7 @@
 
 A modern, responsive web-based SFTP client built with Go. Manage your remote files through an intuitive web interface with support for file uploads, downloads, directory browsing, and bulk operations.
 
-![SFTP Web Client Screenshot](https://raw.githubusercontent.com/itsSwArchitect/sftp-server/refs/heads/main/sftp-server.png)
+![SFTP Web Client Screenshot](https://raw.githubusercontent.com/itsSwArchitect/sftp-server/refs/heads/main/sftp-server1.png)
 
 ## ✨ Features
 
