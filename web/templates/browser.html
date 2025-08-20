@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SFTP Browser - {{.Path}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📁</text></svg>">
+    <style>
+        .file-icon { font-size: 1.2em; }
+        .upload-zone { border: 2px dashed #cbd5e0; transition: all 0.3s; }
+        .upload-zone:hover { border-color: #4299e1; background-color: #ebf8ff; }
+        .upload-zone.dragover { border-color: #3182ce; background-color: #bee3f8; }
+        .progress-bar { transition: width 0.3s ease; }
+        /* Theme transitions */
+        * {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+        .dark .upload-zone { border-color: #4a5568; }
+        .dark .upload-zone:hover { border-color: #63b3ed; background-color: #2d3748; }
+        .dark .upload-zone.dragover { border-color: #4299e1; background-color: #1a202c; }
+        /* Custom scrollbar for dark mode */
+        .dark ::-webkit-scrollbar { width: 8px; background: #374151; }
+        .dark ::-webkit-scrollbar-thumb { background: #6b7280; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen transition-colors duration-300">
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <!-- Header -->
+        <header class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+            <div class="flex items-center justify-between flex-wrap gap-4">
+                <div class="flex items-center space-x-3">
+                    <span class="text-3xl">📁</span>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-800 dark:text-white">SFTP Browser</h1>
+                        <p class="text-gray-600 dark:text-gray-400 text-sm">{{.SessionInfo.Host}}:{{.SessionInfo.Port}} as {{.SessionInfo.Username}}</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <!-- Theme Toggle -->
+                    <button onclick="toggleTheme()" class="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 px-3 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">
+                        <span class="dark:hidden">🌙</span>
+                        <span class="hidden dark:inline">☀️</span>
+                    </button>
+                    <!-- Upload Button -->
+                    <button onclick="document.getElementById('fileInput').click()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-200 flex items-center space-x-2">
+                        <span>📤</span>
+                        <span>Upload</span>
+                    </button>
+                    <!-- Refresh Button -->
+                    <button onclick="window.location.reload()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition duration-200">
+                        🔄
+                    </button>
+                    <!-- Disconnect -->
+                    <a href="/disconnect" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition duration-200">
+                        Disconnect
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Alerts -->
+        {{if .Error}}
+        <div class="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg mb-6" id="error-alert">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                    <span class="mr-2">⚠️</span>
+                    <span>{{.Error}}</span>
+                </div>
+                <button onclick="document.getElementById('error-alert').style.display='none'" class="text-red-500 hover:text-red-700">×</button>
+            </div>
+        </div>
+        {{end}}
+        
+        {{if .Success}}
+        <div class="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 px-4 py-3 rounded-lg mb-6" id="success-alert">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                    <span class="mr-2">✅</span>
+                    <span>{{.Success}}</span>
+                </div>
+                <button onclick="document.getElementById('success-alert').style.display='none'" class="text-green-500 hover:text-green-700">×</button>
+            </div>
+        </div>
+        {{end}}
+
+        <!-- File Upload Zone -->
+        <input type="file" id="fileInput" multiple style="display: none;" onchange="uploadFiles(this.files)">
+        
+        <div id="uploadZone" class="upload-zone bg-white dark:bg-gray-800 rounded-lg p-8 mb-6 text-center" 
+             ondrop="dropHandler(event);" ondragover="dragOverHandler(event);" ondragleave="dragLeaveHandler(event);">
+            <div class="text-gray-600 dark:text-gray-400">
+                <span class="text-4xl mb-4 block">📁</span>
+                <p class="text-lg mb-2">Drop files here to upload</p>
+                <p class="text-sm">or <button onclick="document.getElementById('fileInput').click()" class="text-blue-600 dark:text-blue-400 underline">browse files</button></p>
+            </div>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="uploadProgress" class="hidden bg-white dark:bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Uploading files...</span>
+                <span id="uploadPercent" class="text-sm text-gray-500 dark:text-gray-400">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div id="uploadBar" class="progress-bar bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+            </div>
+            <div id="uploadStatus" class="text-xs text-gray-500 dark:text-gray-400 mt-2"></div>
+        </div>
+
+        <!-- Breadcrumb Navigation -->
+        <nav class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
+            <div class="flex items-center space-x-2 text-sm">
+                <a href="/?path=/&view={{.View}}" class="text-blue-600 dark:text-blue-400 hover:underline">🏠 Root</a>
+                {{if ne .Path "/"}}
+                {{$parts := .Breadcrumbs}}
+                {{$view := .View}}
+                {{range $i, $part := $parts}}
+                <span class="text-gray-400">→</span>
+                <a href="/?path={{$part.Path}}&view={{$view}}" class="text-blue-600 dark:text-blue-400 hover:underline">{{$part.Name}}</a>
+                {{end}}
+                {{end}}
+            </div>
+        </nav>
+
+        <!-- File Browser -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
+        <!-- Toolbar -->
+        <div class="bg-gray-50 dark:bg-gray-700 px-6 py-4 border-b border-gray-200 dark:border-gray-600">
+            <div class="flex items-center justify-between flex-wrap gap-4">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">{{len .Files}} items</span>
+                    <div class="flex items-center space-x-2">
+                        <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" class="rounded text-blue-600 dark:text-blue-400 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2">
+                        <label for="selectAll" class="text-sm text-gray-600 dark:text-gray-400">Select All</label>
+                    </div>
+                    {{if ne .Path "/"}}
+                    <a href="/?path={{.Path | dir}}&view={{.View}}" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center space-x-1">
+                        <span>←</span>
+                        <span>Back</span>
+                    </a>
+                    {{end}}
+                </div>
+                <div class="flex items-center space-x-2">
+                    <!-- Bulk Actions -->
+                    <div id="bulkActions" class="hidden flex items-center space-x-2">
+                        <button onclick="downloadSelected()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            📥 Download Selected
+                        </button>
+                        <button onclick="deleteSelected()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            🗑️ Delete Selected
+                        </button>
+                    </div>
+                    <!-- View Toggle -->
+                    <button onclick="toggleView()" id="viewToggle" class="bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">
+                        Grid View
+                    </button>
+                    <!-- Sort Options -->
+                    <select onchange="sortFiles(this.value)" class="bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 py-1 rounded text-sm border-0">
+                        <option value="name">Sort by Name</option>
+                        <option value="size">Sort by Size</option>
+                        <option value="modified">Sort by Modified</option>
+                        <option value="type">Sort by Type</option>
+                    </select>
+                </div>
+            </div>
+        </div>            <!-- File List -->
+            <div id="fileList" class="divide-y divide-gray-200 dark:divide-gray-600">
+                {{if eq (len .Files) 0}}
+                <div class="p-12 text-center text-gray-500 dark:text-gray-400">
+                    <span class="text-6xl mb-4 block">📂</span>
+                    <p class="text-lg">This directory is empty</p>
+                    <p class="text-sm mt-2">Drop files here or click upload to add files</p>
+                </div>
+                {{else}}
+                {{range .Files}}
+                <div class="file-item flex items-center p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" data-name="{{.Name}}" data-size="{{.Size}}" data-modified="{{.ModTime.Unix}}" data-type="{{if .IsDir}}dir{{else}}file{{end}}">
+                    <!-- Selection checkbox -->
+                    <div class="flex-shrink-0 mr-3">
+                        <input type="checkbox" class="file-checkbox rounded text-blue-600 dark:text-blue-400 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2" 
+                               value="{{.Path}}" data-name="{{.Name}}" data-type="{{if .IsDir}}dir{{else}}file{{end}}" onchange="updateBulkActions()">
+                    </div>
+                    
+                    <div class="flex items-center flex-1 min-w-0">
+                        <!-- File Icon -->
+                        <div class="file-icon mr-3 text-2xl flex-shrink-0">
+                            {{if .IsDir}}📁{{else}}{{fileIcon .Name}}{{end}}
+                        </div>
+                        
+                        <!-- File Info -->
+                        <div class="flex-1 min-w-0">
+                            {{if .IsDir}}
+                            <a href="/?path={{.Path}}&view={{$.View}}" class="text-blue-600 dark:text-blue-400 hover:underline font-medium block truncate">
+                                {{.Name}}
+                            </a>
+                            {{else}}
+                            <div class="font-medium text-gray-900 dark:text-gray-100 block truncate">{{.Name}}</div>
+                            {{end}}
+                            <div class="text-sm text-gray-500 dark:text-gray-400 truncate">
+                                {{if not .IsDir}}{{formatSize .Size}} • {{end}}{{.ModTime.Format "Jan 02, 2006 15:04"}}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Actions -->
+                    <div class="flex items-center space-x-2 ml-4 flex-shrink-0">
+                        {{if not .IsDir}}
+                        <!-- Preview Button for supported files -->
+                        {{if canPreview .Name}}
+                        <button onclick="previewFile('{{.Path}}')" class="text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900 p-2 rounded transition-colors" title="Preview">
+                            👁️
+                        </button>
+                        {{end}}
+                        <!-- Download Button -->
+                        <a href="/download?file={{.Path}}" class="text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900 p-2 rounded transition-colors" title="Download">
+                            📥
+                        </a>
+                        {{else}}
+                        <!-- Directory Download Button -->
+                        <button onclick="downloadDirectory('{{.Path}}')" class="text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900 p-2 rounded transition-colors" title="Download Directory as ZIP">
+                            📦
+                        </button>
+                        {{end}}
+                        <!-- Delete Button -->
+                        <button onclick="deleteFile('{{.Path}}', '{{if .IsDir}}true{{else}}false{{end}}')" class="text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900 p-2 rounded transition-colors" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+                {{end}}
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl max-h-[90vh] w-full overflow-hidden">
+            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-600">
+                <h3 id="previewTitle" class="text-lg font-semibold text-gray-900 dark:text-gray-100"></h3>
+                <button onclick="closePreview()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">✕</button>
+            </div>
+            <div id="previewContent" class="p-4 overflow-auto max-h-[70vh]"></div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full">
+            <div class="p-6">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Confirm Deletion</h3>
+                <p id="deleteMessage" class="text-gray-600 dark:text-gray-400 mb-6"></p>
+                <div class="flex space-x-3">
+                    <button onclick="confirmDelete()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg transition duration-200">
+                        Delete
+                    </button>
+                    <button onclick="closeDeleteModal()" class="flex-1 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 py-2 px-4 rounded-lg transition duration-200">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentView = '{{.View}}' || 'list';
+        let fileToDelete = null;
+        let isDirectory = false;
+
+        // Function to add view parameter to URLs
+        function addViewToUrl(url) {
+            const urlObj = new URL(url, window.location.origin);
+            urlObj.searchParams.set('view', currentView);
+            return urlObj.pathname + urlObj.search;
+        }
+
+        // Initialize view on page load
+        function initializeView() {
+            const button = document.getElementById('viewToggle');
+            if (currentView === 'grid') {
+                button.textContent = 'List View';
+                // Set up grid view without calling toggleView() to avoid infinite loop
+                const fileList = document.getElementById('fileList');
+                fileList.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 p-4';
+                
+                // Update file items for grid view
+                document.querySelectorAll('.file-item').forEach(item => {
+                    item.className = 'file-item bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex flex-col h-full';
+                    
+                    // Restructure content for grid view
+                    const checkbox = item.querySelector('.file-checkbox');
+                    const icon = item.querySelector('.file-icon');
+                    const fileInfo = item.querySelector('.flex-1.min-w-0');
+                    const actions = item.querySelector('.flex.items-center.space-x-2');
+                    
+                    if (!checkbox || !icon || !fileInfo) return; // Skip if elements not found
+                    
+                    // Clear and rebuild structure
+                    item.innerHTML = '';
+                    
+                    // Checkbox at top right
+                    const checkboxDiv = document.createElement('div');
+                    checkboxDiv.className = 'absolute top-2 right-2';
+                    checkboxDiv.appendChild(checkbox);
+                    item.style.position = 'relative';
+                    item.appendChild(checkboxDiv);
+                    
+                    // Icon centered at top
+                    const iconDiv = document.createElement('div');
+                    iconDiv.className = 'text-center mb-3';
+                    icon.className = 'text-4xl';
+                    iconDiv.appendChild(icon);
+                    item.appendChild(iconDiv);
+                    
+                    // File info centered
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'text-center flex-1 mb-3';
+                    
+                    // Extract file name and details
+                    const nameElement = fileInfo.querySelector('a, div');
+                    const detailsElement = fileInfo.querySelector('.text-sm');
+                    
+                    if (nameElement) {
+                        nameElement.className = nameElement.tagName === 'A' ? 
+                            'text-blue-600 dark:text-blue-400 hover:underline font-medium block truncate text-sm' :
+                            'font-medium text-gray-900 dark:text-gray-100 block truncate text-sm';
+                        infoDiv.appendChild(nameElement);
+                    }
+                    
+                    if (detailsElement) {
+                        detailsElement.className = 'text-xs text-gray-500 dark:text-gray-400 truncate mt-1';
+                        infoDiv.appendChild(detailsElement);
+                    }
+                    
+                    item.appendChild(infoDiv);
+                    
+                    // Actions at bottom
+                    if (actions) {
+                        actions.className = 'flex items-center justify-center space-x-1';
+                        const actionButtons = actions.querySelectorAll('button, a');
+                        actionButtons.forEach(btn => {
+                            btn.className = btn.className.replace('p-2', 'p-1 text-sm');
+                        });
+                        item.appendChild(actions);
+                    }
+                });
+            } else {
+                button.textContent = 'Grid View';
+            }
+            
+            // Update all navigation links to include current view
+            updateNavigationLinks();
+        }
+
+        // Function to update all navigation links with current view
+        function updateNavigationLinks() {
+            // Update breadcrumb links
+            document.querySelectorAll('nav a[href*="path="]').forEach(link => {
+                const url = new URL(link.href);
+                url.searchParams.set('view', currentView);
+                link.href = url.pathname + url.search;
+            });
+            
+            // Update directory links in file list
+            document.querySelectorAll('.file-item a[href*="path="]').forEach(link => {
+                const url = new URL(link.href);
+                url.searchParams.set('view', currentView);
+                link.href = url.pathname + url.search;
+            });
+            
+            // Update back button
+            const backButton = document.querySelector('a[href*="path="][href*="←"]');
+            if (backButton) {
+                const url = new URL(backButton.href);
+                url.searchParams.set('view', currentView);
+                backButton.href = url.pathname + url.search;
+            }
+        }
+
+        // Theme management
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            const theme = savedTheme || systemTheme;
+            
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        }
+
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.contains('dark');
+            if (isDark) {
+                document.documentElement.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // File operations
+        function deleteFile(path, isDir) {
+            fileToDelete = path;
+            isDirectory = isDir === 'true';
+            document.getElementById('deleteMessage').textContent = 
+                `Are you sure you want to delete ${isDirectory ? 'directory' : 'file'} "${path.split('/').pop()}"?` +
+                (isDirectory ? ' This will delete all contents inside it.' : '');
+            document.getElementById('deleteModal').classList.remove('hidden');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').classList.add('hidden');
+            fileToDelete = null;
+        }
+
+        function confirmDelete() {
+            if (fileToDelete) {
+                fetch('/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `file=${encodeURIComponent(fileToDelete)}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+                closeDeleteModal();
+            }
+        }
+
+        // Bulk operations
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.file-checkbox');
+            
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+            });
+            
+            updateBulkActions();
+        }
+
+        function updateBulkActions() {
+            const checkboxes = document.querySelectorAll('.file-checkbox');
+            const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+            const bulkActions = document.getElementById('bulkActions');
+            const selectAll = document.getElementById('selectAll');
+            
+            // Show/hide bulk actions
+            if (checkedBoxes.length > 0) {
+                bulkActions.classList.remove('hidden');
+                bulkActions.classList.add('flex');
+            } else {
+                bulkActions.classList.add('hidden');
+                bulkActions.classList.remove('flex');
+            }
+            
+            // Update select all checkbox state
+            const allChecked = checkboxes.length > 0 && checkedBoxes.length === checkboxes.length;
+            const someChecked = checkedBoxes.length > 0;
+            
+            selectAll.checked = allChecked;
+            selectAll.indeterminate = someChecked && !allChecked;
+        }
+
+        function downloadSelected() {
+            const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+            if (checkedBoxes.length === 0) {
+                alert('Please select files to download');
+                return;
+            }
+            
+            const files = Array.from(checkedBoxes).map(cb => cb.value);
+            
+            if (files.length === 1) {
+                // Single file download
+                window.location.href = `/download?file=${encodeURIComponent(files[0])}`;
+            } else {
+                // Multiple files download
+                downloadMultipleFiles(files);
+            }
+        }
+
+        function downloadMultipleFiles(files) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/download-multiple';
+            form.style.display = 'none';
+            
+            files.forEach(file => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'files';
+                input.value = file;
+                form.appendChild(input);
+            });
+            
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        }
+
+        function downloadDirectory(path) {
+            // Download directory as ZIP
+            window.location.href = `/download?file=${encodeURIComponent(path)}&type=directory`;
+        }
+
+        function deleteSelected() {
+            const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+            if (checkedBoxes.length === 0) {
+                alert('Please select files to delete');
+                return;
+            }
+            
+            const files = Array.from(checkedBoxes).map(cb => ({
+                path: cb.value,
+                name: cb.dataset.name,
+                type: cb.dataset.type
+            }));
+            
+            const fileNames = files.map(f => f.name).join(', ');
+            const hasDirectories = files.some(f => f.type === 'dir');
+            
+            let message = `Are you sure you want to delete ${files.length} item(s): ${fileNames}?`;
+            if (hasDirectories) {
+                message += '\n\nThis includes directories and all their contents.';
+            }
+            
+            if (confirm(message)) {
+                deleteMultipleFiles(files.map(f => f.path));
+            }
+        }
+
+        function deleteMultipleFiles(files) {
+            // Delete files one by one (could be optimized with a bulk delete endpoint)
+            let completed = 0;
+            const total = files.length;
+            
+            function deleteNext() {
+                if (completed >= total) {
+                    window.location.reload();
+                    return;
+                }
+                
+                const file = files[completed];
+                fetch('/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `file=${encodeURIComponent(file)}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    completed++;
+                    if (data.success) {
+                        deleteNext();
+                    } else {
+                        alert(`Error deleting ${file}: ${data.error}`);
+                        deleteNext();
+                    }
+                })
+                .catch(error => {
+                    completed++;
+                    alert(`Error deleting ${file}: ${error.message}`);
+                    deleteNext();
+                });
+            }
+            
+            deleteNext();
+        }
+
+        function previewFile(path) {
+            document.getElementById('previewTitle').textContent = path.split('/').pop();
+            document.getElementById('previewContent').innerHTML = '<div class="text-center py-8">Loading...</div>';
+            document.getElementById('previewModal').classList.remove('hidden');
+
+            fetch(`/preview?file=${encodeURIComponent(path)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const content = document.getElementById('previewContent');
+                    if (data.success) {
+                        if (data.type === 'text') {
+                            content.innerHTML = `<pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">${escapeHtml(data.content)}</pre>`;
+                        } else if (data.type === 'image') {
+                            content.innerHTML = `<img src="data:${data.mimeType};base64,${data.content}" class="max-w-full h-auto mx-auto" alt="Preview">`;
+                        }
+                    } else {
+                        content.innerHTML = `<div class="text-red-600 dark:text-red-400">Error: ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('previewContent').innerHTML = `<div class="text-red-600 dark:text-red-400">Error: ${error.message}</div>`;
+                });
+        }
+
+        function closePreview() {
+            document.getElementById('previewModal').classList.add('hidden');
+        }
+
+        // File upload
+        function dragOverHandler(ev) {
+            ev.preventDefault();
+            ev.currentTarget.classList.add('dragover');
+        }
+
+        function dragLeaveHandler(ev) {
+            ev.currentTarget.classList.remove('dragover');
+        }
+
+        function dropHandler(ev) {
+            ev.preventDefault();
+            ev.currentTarget.classList.remove('dragover');
+            
+            if (ev.dataTransfer.items) {
+                const files = [];
+                for (let i = 0; i < ev.dataTransfer.items.length; i++) {
+                    if (ev.dataTransfer.items[i].kind === 'file') {
+                        files.push(ev.dataTransfer.items[i].getAsFile());
+                    }
+                }
+                uploadFiles(files);
+            }
+        }
+
+        function uploadFiles(files) {
+            if (files.length === 0) return;
+
+            const progressDiv = document.getElementById('uploadProgress');
+            const progressBar = document.getElementById('uploadBar');
+            const progressPercent = document.getElementById('uploadPercent');
+            const progressStatus = document.getElementById('uploadStatus');
+
+            progressDiv.classList.remove('hidden');
+            
+            let completed = 0;
+            const total = files.length;
+
+            progressStatus.textContent = `Uploading ${total} file(s)...`;
+
+            Array.from(files).forEach((file, index) => {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('path', '{{.Path}}');
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    completed++;
+                    const percent = Math.round((completed / total) * 100);
+                    progressBar.style.width = percent + '%';
+                    progressPercent.textContent = percent + '%';
+                    
+                    if (completed === total) {
+                        progressStatus.textContent = 'Upload complete!';
+                        setTimeout(() => {
+                            progressDiv.classList.add('hidden');
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        progressStatus.textContent = `Uploaded ${completed} of ${total} files...`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Upload error:', error);
+                    progressStatus.textContent = `Error uploading ${file.name}`;
+                });
+            });
+        }
+
+        // View and sorting
+        function toggleView() {
+            const button = document.getElementById('viewToggle');
+            const fileList = document.getElementById('fileList');
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            if (currentView === 'list') {
+                currentView = 'grid';
+                button.textContent = 'List View';
+                urlParams.set('view', 'grid');
+                
+                fileList.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 p-4';
+                // Update file items for grid view
+                document.querySelectorAll('.file-item').forEach(item => {
+                    item.className = 'file-item bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex flex-col h-full';
+                    
+                    // Restructure content for grid view
+                    const checkbox = item.querySelector('.file-checkbox');
+                    const icon = item.querySelector('.file-icon');
+                    const fileInfo = item.querySelector('.flex-1.min-w-0');
+                    const actions = item.querySelector('.flex.items-center.space-x-2');
+                    
+                    // Clear and rebuild structure
+                    item.innerHTML = '';
+                    
+                    // Checkbox at top right
+                    const checkboxDiv = document.createElement('div');
+                    checkboxDiv.className = 'absolute top-2 right-2';
+                    checkboxDiv.appendChild(checkbox);
+                    item.style.position = 'relative';
+                    item.appendChild(checkboxDiv);
+                    
+                    // Icon centered at top
+                    const iconDiv = document.createElement('div');
+                    iconDiv.className = 'text-center mb-3';
+                    icon.className = 'text-4xl';
+                    iconDiv.appendChild(icon);
+                    item.appendChild(iconDiv);
+                    
+                    // File info centered
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'text-center flex-1 mb-3';
+                    
+                    // Extract file name and details
+                    const nameElement = fileInfo.querySelector('a, div');
+                    const detailsElement = fileInfo.querySelector('.text-sm');
+                    
+                    if (nameElement) {
+                        nameElement.className = nameElement.tagName === 'A' ? 
+                            'text-blue-600 dark:text-blue-400 hover:underline font-medium block truncate text-sm' :
+                            'font-medium text-gray-900 dark:text-gray-100 block truncate text-sm';
+                        infoDiv.appendChild(nameElement);
+                    }
+                    
+                    if (detailsElement) {
+                        detailsElement.className = 'text-xs text-gray-500 dark:text-gray-400 truncate mt-1';
+                        infoDiv.appendChild(detailsElement);
+                    }
+                    
+                    item.appendChild(infoDiv);
+                    
+                    // Actions at bottom
+                    if (actions) {
+                        actions.className = 'flex items-center justify-center space-x-1';
+                        const actionButtons = actions.querySelectorAll('button, a');
+                        actionButtons.forEach(btn => {
+                            btn.className = btn.className.replace('p-2', 'p-1 text-sm');
+                        });
+                        item.appendChild(actions);
+                    }
+                });
+            } else {
+                currentView = 'list';
+                button.textContent = 'Grid View';
+                urlParams.set('view', 'list');
+                fileList.className = 'divide-y divide-gray-200 dark:divide-gray-600';
+                // Reload the page to restore list view structure
+                window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
+                return;
+            }
+            
+            // Update URL without reloading
+            const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+            window.history.replaceState({}, '', newUrl);
+            
+            // Update all navigation links with new view
+            updateNavigationLinks();
+        }
+
+        function sortFiles(criteria) {
+            const fileList = document.getElementById('fileList');
+            const items = Array.from(fileList.querySelectorAll('.file-item'));
+            
+            items.sort((a, b) => {
+                let aVal, bVal;
+                
+                switch(criteria) {
+                    case 'name':
+                        aVal = a.dataset.name.toLowerCase();
+                        bVal = b.dataset.name.toLowerCase();
+                        break;
+                    case 'size':
+                        aVal = parseInt(a.dataset.size) || 0;
+                        bVal = parseInt(b.dataset.size) || 0;
+                        return bVal - aVal; // Descending
+                    case 'modified':
+                        aVal = parseInt(a.dataset.modified) || 0;
+                        bVal = parseInt(b.dataset.modified) || 0;
+                        return bVal - aVal; // Descending
+                    case 'type':
+                        aVal = a.dataset.type + a.dataset.name.toLowerCase();
+                        bVal = b.dataset.type + b.dataset.name.toLowerCase();
+                        break;
+                }
+                
+                return aVal.localeCompare ? aVal.localeCompare(bVal) : aVal - bVal;
+            });
+            
+            items.forEach(item => fileList.appendChild(item));
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Auto-hide alerts after 8 seconds
+        setTimeout(() => {
+            const alerts = document.querySelectorAll('[id$="-alert"]');
+            alerts.forEach(alert => {
+                if (alert.style.display !== 'none') {
+                    alert.style.opacity = '0';
+                    setTimeout(() => alert.style.display = 'none', 300);
+                }
+            });
+        }, 8000);
+
+        // Initialize theme on page load
+        initTheme();
+        
+        // Initialize view mode
+        initializeView();
+    </script>
+</body>
+</html>
