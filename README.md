@@ -393,22 +393,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Test Coverage**: 80%+ (goal)
 - **Dependencies**: Minimal, security-focused
 
-## 🔗 Links
-
-- **Documentation**: [Wiki](../../wiki)
-- **Issue Tracker**: [Issues](../../issues)
-- **Discussions**: [Discussions](../../discussions)
-- **Releases**: [Releases](../../releases)
-
-## 📞 Support
-
-- **Bug Reports**: [Create an issue](../../issues/new?template=bug_report.md)
-- **Feature Requests**: [Create an issue](../../issues/new?template=feature_request.md)
-- **Security Issues**: Email security@yourdomain.com
-- **General Questions**: [Start a discussion](../../discussions)
-
 ---
 
-**Made with ❤️ by the SFTP Web Client team**
+**Made with ❤️ by the Abid**
 
 *Star ⭐ this repository if you find it helpful!*
